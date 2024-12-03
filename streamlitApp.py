@@ -1,12 +1,9 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 import plotly.express as px
-import plotly.graph_objects as go
-import numpy as np
-import pickle
-from sklearn.preprocessing import OneHotEncoder
+# import pickle
+# from sklearn.preprocessing import OneHotEncoder
 
 # Load data (replace with your data loading logic)
 # @st.cache
