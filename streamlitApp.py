@@ -2,32 +2,25 @@ import streamlit as st
 import pandas as pd
 # import seaborn as sns
 import plotly.express as px
-# import pickle
-# from sklearn.preprocessing import OneHotEncoder
+import joblib
 
 # Load data (replace with your data loading logic)
 # @st.cache
 def load_data():
-    return pd.read_csv("HRDataset_v14.csv")
+    return pd.read_csv("salary_with_department.csv")
 
 df = load_data()
 
-# Convert relevant columns to datetime
 
-df['DateofHire'] = pd.to_datetime(df['DateofHire'])
-df['DateofTermination'] = pd.to_datetime(df['DateofTermination'])
+age_col = 'Age'
+race_col = 'Race'
+salary_col = 'Salary'
+gender_col = 'Gender'
 
-df['DOB'] = pd.to_datetime(df['DOB'], format='%m/%d/%y')
-df['DOB'] = df['DOB'].apply(lambda x: x - pd.DateOffset(years=100) if x.year > 2022 else x)
-df['Age'] = (pd.to_datetime('today') - df['DOB']).dt.days // 365 
-
-df = df[df['Salary'] < df['Salary'].quantile(0.99)]
-
-bins = [20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 53, 56, 59, 62, 65, 68, 71, 74, 77, 80]
-labels = ['20-22', '23-25', '26-28', '29-31', '32-34', '35-37', '38-40', '41-43', '44-46', '47-49', 
-          '50-52', '53-55', '56-58', '59-61', '62-64', '65-67', '68-70', '71-73', '74-76', '77-79']
+bins = [ 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 53, 56, 59, 62, 65]
+labels = ['17-19', '20-22', '23-25', '26-28', '29-31', '32-34', '35-37', '38-40', '41-43', '44-46', '47-49', 
+          '50-52', '53-55', '56-58', '59-61', '62-64']
 df['AgeGroup'] = pd.cut(df['Age'], bins=bins, labels=labels)
-
 
 def dashboard():
     # Styling improvements
@@ -52,13 +45,11 @@ def dashboard():
         unsafe_allow_html=True,
     )
 
-     # Metrics for salary equality
-    st.sidebar.header("Salary Equality Metrics")
-
     # Add filters for interactivity
     st.sidebar.header("Filters")
-    selected_department = st.sidebar.selectbox("Department", options=['All'] + list(df['Department'].unique()), index=0)
-    if selected_department is 'All':
+    options = ['All'] + [dept for dept in df['Department'].unique() if 'Management' not in dept]
+    selected_department = st.sidebar.selectbox("Department", options = options, index=0)
+    if selected_department == 'All':
         filtered_data = df
     else:
         filtered_data = df[df['Department'] == selected_department]
@@ -70,32 +61,44 @@ def dashboard():
 
     age_salary = filtered_data.groupby('AgeGroup')['Salary'].describe().round(2)
 
-    race_salary = filtered_data.groupby('RaceDesc')['Salary'].describe().round(2)
+    race_salary = filtered_data.groupby('Race')['Salary'].describe().round(2)
 
-    gender_salary = filtered_data.groupby('Sex')['Salary'].describe().round(2)
-    gender_avg_salary = filtered_data.groupby('Sex', as_index=False)['Salary'].mean()
+    gender_salary = filtered_data.groupby('Gender')['Salary'].describe().round(2)
+    gender_avg_salary = filtered_data.groupby('Gender', as_index=False)['Salary'].mean()
 
+    gender_race_salary = (
+    filtered_data.groupby(['Gender', 'Race'])['Salary']
+    .mean()
+    .reset_index()
+        )
+
+    st.sidebar.header("Salary Equality Metrics")
 
     gender_gap = gender_salary['mean'][1] - gender_salary['mean'][0]
     st.sidebar.metric("Gender Salary Gap (M - F)", f"${gender_gap:,.2f}")
 
-    race_salary_diff = race_salary['mean'].max() - race_salary['mean'].min()
-    st.sidebar.metric("Race Salary Disparity", f"${race_salary_diff:,.2f}")
+    side_col1, side_col2 = st.sidebar.columns(2) 
 
+    side_col1.metric( "Females",f"{filtered_data['Gender'].value_counts().get('Female', ):,}")
+    side_col2.metric( "Males",f"{filtered_data['Gender'].value_counts().get('Male', ):,}")
+    
     max_salary_row = race_salary.loc[race_salary['mean'].idxmax()]
     max_salary_race = max_salary_row.name  
 
     min_salary_row = race_salary.loc[race_salary['mean'].idxmin()]
     min_salary_race = min_salary_row.name  
 
-    st.sidebar.caption(f"The race with the highest average salary is: {max_salary_race}")
-    st.sidebar.caption(f"The race with the lowest average salary is: {min_salary_race}")
+    
+
+    # st.sidebar.text(f"The race with the highest average salary is: {max_salary_race}")
+    # st.sidebar.text(f"The race with the lowest average salary is: {min_salary_race}")
     
     st.sidebar.markdown(
         """
         ---
         **Developed by Luke Carroll using Streamlit and Plotly**
-        [Click Here for my Website](https://lukecarrolldata.org)
+
+        [Click Here for Luke's Website](https://lukecarrolldata.org)
         """
     )
 
@@ -110,13 +113,6 @@ def dashboard():
             border-radius: 5px;
             box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.05), 0 6px 20px 0 rgba(0, 0, 0, 0.15);
         }}
-
-        .stContainer {{
-            background-color: {bg_colour};
-            outline: 5px solid {bg_colour};
-            border-radius: 5px;
-            box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.05), 0 6px 20px 0 rgba(0, 0, 0, 0.15);
-        }}
         </style>
         """, unsafe_allow_html=True)
 
@@ -124,13 +120,13 @@ def dashboard():
 
     with col1:
         fig_gender = px.bar(
-            gender_avg_salary,
+            gender_avg_salary[gender_avg_salary['Gender'] != 'Other'],
             x='Salary',
-            y='Sex',
+            y='Gender',
             template="plotly_white",
-            labels={'Salary': 'Average Salary', 'Sex': 'Gender'},
-            color = 'Sex',
-            color_discrete_map={ 'F': '#735DA5', 'M ': '#D3C5E5',},
+            labels={'Salary': 'Average Salary'},
+            color = 'Gender',
+            color_discrete_map={ 'Female': '#735DA5', 'Male': '#D3C5E5',},
             
         )
 
@@ -153,28 +149,15 @@ def dashboard():
 
 
     with col2:
-        gender_race_salary = (
-            filtered_data.groupby(['Sex', 'RaceDesc'])['Salary']
-            .mean()
-            .reset_index()
-        )
-
-        def add_line_breaks(text):
-            words = text.split(' ')
-            return '<br>'.join([' '.join(words[i:i+2]) for i in range(0, len(words), 2)])
-
-        gender_race_salary['RaceDesc'] = gender_race_salary['RaceDesc'].apply(add_line_breaks)
-
         fig_gender_race = px.bar(
-            gender_race_salary,
-            orientation ='h',
+            gender_race_salary[gender_race_salary['Gender'] != "Other"],
             x = 'Salary',
-            y = 'RaceDesc',
-            color = 'Sex',
+            y = 'Race',
+            color = 'Gender',
             barmode = 'group',
             template = "plotly_white",
-            labels={'RaceDesc': 'Race', 'Salary': 'Average Salary', 'Sex': 'Gender'},
-            color_discrete_map={'M ': '#D3C5E5', 'F': '#735DA5'}
+            labels={'Salary': 'Average Salary'},
+            color_discrete_map={'Female': '#735DA5', 'Male': '#D3C5E5'}
         )
 
         fig_gender_race.update_layout(
@@ -182,12 +165,13 @@ def dashboard():
             plot_bgcolor = bg_colour,
             title_text = "Salary by Gender and Race",
             height = 300,
+            yaxis=dict(autorange="reversed"),
             legend = dict(
-                orientation = "h",  # Horizontal layout
-                yanchor = "bottom",  # Align the bottom of the legend
-                y = 1.02,  # Slightly above the plot
-                xanchor = "right",  # Align the legend to the right
-                x = 1  # Position at the far right horizontally
+                orientation = "h",  
+                yanchor = "bottom", 
+                y = 1.02,  
+                xanchor = "right",  
+                x = 1 
             )
         )
 
@@ -196,17 +180,17 @@ def dashboard():
         
     st.text('')
 
-    df_avg_salary = filtered_data.groupby(['AgeGroup', 'Sex'], as_index=False)['Salary'].mean()
+    df_avg_salary = filtered_data.groupby(['AgeGroup', 'Gender'], as_index=False)['Salary'].mean()
 
     fig_age = px.line(
-        df_avg_salary, 
+        df_avg_salary[df_avg_salary['Gender'] != 'Other'], 
         x = 'AgeGroup', 
         y = 'Salary', 
-        color = 'Sex',  
+        color = 'Gender',  
         template = "plotly_white",
-        labels = {'AgeGroup': 'Age Group', 'Salary': 'Average Salary', 'Sex': 'Gender'},
+        labels = {'AgeGroup': 'Age Group', 'Salary': 'Average Salary'},
         line_shape = 'spline',
-        color_discrete_map = {'M ': '#D3C5E5', 'F': '#735DA5'},
+        color_discrete_map = {'Male': '#D3C5E5', 'Female': '#735DA5'},
         markers = True
     )
 
@@ -243,6 +227,15 @@ def ML_Deployment():
             padding-bottom: 0rem;
             padding-left: 0rem;
         }
+
+        div.stButton > button:first-child {
+            background-color: #00cc00;
+            color: white;
+        }
+
+        div.stButton > button:first-child:hover {
+            border-color: #828282;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -251,29 +244,36 @@ def ML_Deployment():
 
     st.markdown('<h1 style="color:#735DA5;">Machine Learning Model Predicting Employee Salary</h1>', unsafe_allow_html=True)
 
-
-    # with open('model.pkl', 'rb') as file:
-    #     model = pickle.load(file)
     
-    def get_user_input():
-        department = st.selectbox("Department", options = df['Department'].unique(), index = 0)
-        gender = st.selectbox("Gender", options = ["Other"] + list(df['Sex'].unique()), index = 0)
+    def get_user_input():        
+        gender_list = ['Female', 'Male', 'Other']
+        education_level_list = ["Bachelor's Degree", "High School", "Master's Degree", "PhD"]
+        department_list = ['Administration',
+       'Finance', 'Human Resources',
+       'Management', 'Operations', 'Other',
+       'Product & Project Management',
+       'Research & Strategy', 'Sales & Marketing',
+       'Technology']
+        
+        department = st.selectbox("Department", options = department_list, index = 0)
+        gender = st.selectbox("Gender", options = gender_list, index = 0)
         age = st.number_input('Age', min_value=18)
-        marital_status = st.selectbox('Marital Status', ['Divorced', 'Married', 'Separated', 'Single', 'Widowed'])
+        experience = st.number_input('Expereince',min_value=0)
+        education_level = st.selectbox("Education Level", options = education_level_list, index = 0)
 
-        department_dict = {f'Department_{dep}': int(dep == department) for dep in df['Department'].unique()}
-        sex_dict = {f'Department_{gen}': int(gen == gender) for gen in ["Other"] + list(df['Sex'].unique())}
+        department_dict = {f'Department_{dep}': int(dep == department) for dep in department_list}
+        gender_dict = {f'Gender_{gen}': int(gen == gender) for gen in gender_list}
+        education_level_dict = {f'Education Level Updated_{edu}': int(edu == education_level) for edu in education_level_list}
 
         user_input = pd.DataFrame({
             'Age': [age],
-            **sex_dict,
+            'Years of Experience': [experience],
+            **gender_dict,
+            **education_level_dict,
             **department_dict,
-            'MaritalDesc_Divorced': [1 if marital_status == 'Divorced' else 0],
-            'MaritalDesc_Married': [1 if marital_status == 'Married' else 0],
-            'MaritalDesc_Separated': [1 if marital_status == 'Separated' else 0],
-            'MaritalDesc_Single': [1 if marital_status == 'Single' else 0],
-            'MaritalDesc_Widowed': [1 if marital_status == 'Widowed' else 0],
         })
+
+        st.text('')
 
         return user_input
     
@@ -281,23 +281,32 @@ def ML_Deployment():
         user_input_transformed = pd.get_dummies(user_input)
         return user_input_transformed
     
-    # def make_prediction(user_input):
-    #     # Transform categorical data
-    #     transformed_input = transform_input_data(user_input)
-    #     # Predict using the trained model
-    #     prediction = model.predict(transformed_input)
-    #     return prediction
-    
-    # def display_results(prediction):
-    #     st.write(f'The model prediction is: {prediction[0]}')
+    def make_prediction(user_input):
+        transformed_input = transform_input_data(user_input)
+        model = joblib.load('random_forest_model.pkl') 
+        prediction = model.predict(transformed_input)
+        return prediction
 
-    st.write('COMING SOON- Please fill in the details below to get the prediction.')
+    st.markdown('<p style="color:#ff0000;"><strong>Disclaimer:</strong> This model has been developed using a composite dataset obtained from Kaggle.com. Please note that the accuracy of the model has not been verified, and there is no supporting evidence to guarantee its predictive reliability. As such, all predictions generated by this model should be treated with caution and used accordingly.</p>', unsafe_allow_html=True)
+    st.text('Please fill in the details below to get the prediction.')
 
     user_input = get_user_input()
 
-    # prediction = make_prediction(user_input)
+    prediction = make_prediction(user_input)
+    prediction = prediction[0] * 1.55
 
-    # display_results(prediction)
+    if 'clicked' not in st.session_state:
+            st.session_state.clicked = False
+
+    def click_button():
+        st.session_state.clicked = True
+
+    st.button('Submit', on_click=click_button)
+
+    if st.session_state.clicked:
+        # The message and nested widget will remain on the page
+        st.markdown(f'<h3 style="color:#735DA5;">Salary Prediction: ${prediction:,.2f} </h3>', unsafe_allow_html=True)
+        st.session_state.clicked = False
 
 
 
@@ -311,3 +320,16 @@ page_names_to_funcs = {
 
 demo_name = st.sidebar.selectbox("Choose a page", page_names_to_funcs.keys())
 page_names_to_funcs[demo_name]()
+
+
+
+
+
+
+# -----Offcuts------
+#
+# def add_line_breaks(text):
+#             words = text.split(' ')
+#             return '<br>'.join([' '.join(words[i:i+2]) for i in range(0, len(words), 2)])
+
+# gender_race_salary['Race'] = gender_race_salary['Race'].apply(add_line_breaks)
